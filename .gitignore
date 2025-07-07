@@ -1,0 +1,7 @@
+.env
+main
+test
+*.so
+*.o
+*.dll
+*.dylib

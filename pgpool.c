@@ -36,19 +36,18 @@ struct pgpool {
 
 // Default configuration values
 static const pgpool_config_t DEFAULT_CONFIG = {
-    .min_connections = 1,
-    .max_connections = 10,
-    .connect_timeout = 5,
-    .auto_reconnect = true,
-    .connection_init = NULL,
+    .min_connections  = 1,
+    .max_connections  = 10,
+    .connect_timeout  = 5,
+    .auto_reconnect   = true,
+    .connection_init  = NULL,
     .connection_close = NULL,
-    .conninfo = NULL,
+    .conninfo         = NULL,
 };
 
 // Safe string duplication with error handling
 static inline char* safe_strdup(const char* str) {
-    if (!str)
-        return NULL;
+    if (!str) return NULL;
 
     char* copy = strdup(str);
     if (!copy) {
@@ -59,8 +58,7 @@ static inline char* safe_strdup(const char* str) {
 
 // Safe error message setting
 static void set_error_message(pgconn_t* conn, const char* message) {
-    if (!conn)
-        return;
+    if (!conn) return;
 
     free(conn->last_error);
     conn->last_error = NULL;
@@ -113,8 +111,8 @@ static pgconn_t* create_connection(pgpool_t* pool) {
 
     // Set connection timeout if specified
     if (pool->config.connect_timeout > 0) {
-        char timeout_str[32];
-        snprintf(timeout_str, sizeof(timeout_str), "SET statement_timeout = %d",
+        char timeout_str[64];
+        snprintf(timeout_str, sizeof(timeout_str) - 1, "SET statement_timeout = %d",
                  pool->config.connect_timeout * 1000);
 
         PGresult* res = PQexec(conn->raw_conn, timeout_str);
@@ -159,8 +157,7 @@ static bool validate_connection(pgconn_t* conn) {
 
 // Internal function to destroy a connection
 static void destroy_connection(pgpool_t* pool, pgconn_t* conn) {
-    if (!conn)
-        return;
+    if (!conn) return;
 
     // Call close callback if provided
     if (pool && pool->config.connection_close && conn->raw_conn) {
@@ -199,18 +196,12 @@ pgpool_t* pgpool_create(const pgpool_config_t* config) {
 
     // Initialize with default config then override with user settings
     pool->config = DEFAULT_CONFIG;
-    if (config->min_connections > 0)
-        pool->config.min_connections = config->min_connections;
-    if (config->max_connections > 0)
-        pool->config.max_connections = config->max_connections;
-    if (config->connect_timeout > 0)
-        pool->config.connect_timeout = config->connect_timeout;
-    if (config->auto_reconnect)
-        pool->config.auto_reconnect = config->auto_reconnect;
-    if (config->connection_init)
-        pool->config.connection_init = config->connection_init;
-    if (config->connection_close)
-        pool->config.connection_close = config->connection_close;
+    if (config->min_connections > 0) pool->config.min_connections = config->min_connections;
+    if (config->max_connections > 0) pool->config.max_connections = config->max_connections;
+    if (config->connect_timeout > 0) pool->config.connect_timeout = config->connect_timeout;
+    if (config->auto_reconnect) pool->config.auto_reconnect = config->auto_reconnect;
+    if (config->connection_init) pool->config.connection_init = config->connection_init;
+    if (config->connection_close) pool->config.connection_close = config->connection_close;
 
     // Make a copy of the connection string
     pool->conninfo = safe_strdup(config->conninfo);
@@ -273,8 +264,7 @@ error_free_pool:
 
 // Destroy a connection pool
 void pgpool_destroy(pgpool_t* pool) {
-    if (!pool)
-        return;
+    if (!pool) return;
 
     pthread_mutex_lock(&pool->lock);
 
@@ -337,7 +327,7 @@ pgconn_t* pgpool_acquire(pgpool_t* pool, int timeout_ms) {
             return NULL;
         }
 
-        ts.tv_sec = tv.tv_sec + timeout_ms / 1000;
+        ts.tv_sec  = tv.tv_sec + timeout_ms / 1000;
         ts.tv_nsec = tv.tv_usec * 1000 + (timeout_ms % 1000) * 1000000L;
 
         if (ts.tv_nsec >= 1000000000L) {
@@ -352,15 +342,14 @@ pgconn_t* pgpool_acquire(pgpool_t* pool, int timeout_ms) {
         // First try to find an idle connection
         for (size_t i = 0; i < pool->connection_count; i++) {
             pgconn_t* conn = pool->connections[i];
-            if (!conn || conn->in_use)
-                continue;
+            if (!conn || conn->in_use) continue;
 
             // Validate the connection if auto_reconnect is enabled
             if (pool->config.auto_reconnect && !validate_connection(conn)) {
                 fprintf(stderr, "pgpool: Reconnecting stale connection (ID: %u)\n", conn->connection_id);
                 destroy_connection(pool, conn);
                 pool->connections[i] = create_connection(pool);
-                conn = pool->connections[i];
+                conn                 = pool->connections[i];
                 if (!conn) {
                     // Remove the slot and compact the array
                     for (size_t j = i; j < pool->connection_count - 1; j++) {
@@ -373,7 +362,7 @@ pgconn_t* pgpool_acquire(pgpool_t* pool, int timeout_ms) {
             }
 
             // Mark connection as in use
-            conn->in_use = true;
+            conn->in_use        = true;
             conn->last_activity = time(NULL);
             if (pool->idle_count > 0) {
                 pool->idle_count--;
@@ -387,8 +376,8 @@ pgconn_t* pgpool_acquire(pgpool_t* pool, int timeout_ms) {
         if (pool->connection_count < (size_t)pool->config.max_connections) {
             pgconn_t* conn = create_connection(pool);
             if (conn) {
-                conn->in_use = true;
-                conn->last_activity = time(NULL);
+                conn->in_use                                = true;
+                conn->last_activity                         = time(NULL);
                 pool->connections[pool->connection_count++] = conn;
                 pthread_mutex_unlock(&pool->lock);
                 return conn;
@@ -452,7 +441,7 @@ void pgpool_release(pgpool_t* pool, pgconn_t* conn) {
         conn->transaction_active = false;
     }
 
-    conn->in_use = false;
+    conn->in_use        = false;
     conn->last_activity = time(NULL);
     pool->idle_count++;
 
@@ -467,8 +456,7 @@ void pgpool_release(pgpool_t* pool, pgconn_t* conn) {
 
 // Clear any pending results from a connection
 static void consume_all_results(pgconn_t* conn) {
-    if (!conn || !conn->raw_conn)
-        return;
+    if (!conn || !conn->raw_conn) return;
 
     PGresult* res;
     while ((res = PQgetResult(conn->raw_conn)) != NULL) {
@@ -478,8 +466,7 @@ static void consume_all_results(pgconn_t* conn) {
 
 // Wait for query completion with timeout
 static bool wait_for_query_completion(pgconn_t* conn, int timeout_ms) {
-    if (!conn || !conn->raw_conn)
-        return false;
+    if (!conn || !conn->raw_conn) return false;
 
     int socket_fd = PQsocket(conn->raw_conn);
     if (socket_fd < 0) {
@@ -495,7 +482,7 @@ static bool wait_for_query_completion(pgconn_t* conn, int timeout_ms) {
         FD_SET(socket_fd, &input_mask);
 
         if (timeout_ms >= 0) {
-            tv.tv_sec = timeout_ms / 1000;
+            tv.tv_sec  = timeout_ms / 1000;
             tv.tv_usec = (timeout_ms % 1000) * 1000;
         }
 
@@ -505,9 +492,8 @@ static bool wait_for_query_completion(pgconn_t* conn, int timeout_ms) {
             set_error_message(conn, "Query execution timed out");
             PQcancel(PQgetCancel(conn->raw_conn), NULL, 0);
             return false;
-        } else if (result < 0) {  // Error
-            if (errno == EINTR)
-                continue;  // Interrupted by signal, retry
+        } else if (result < 0) {           // Error
+            if (errno == EINTR) continue;  // Interrupted by signal, retry
 
             char error_buf[256];
             snprintf(error_buf, sizeof(error_buf), "select() failed: %s", strerror(errno));
@@ -530,8 +516,7 @@ static bool wait_for_query_completion(pgconn_t* conn, int timeout_ms) {
 // Execute a query using a pooled connection
 bool pgpool_execute(pgconn_t* conn, const char* query, int timeout_ms) {
     if (!conn || !conn->raw_conn || !query) {
-        if (conn)
-            set_error_message(conn, "Invalid connection or query");
+        if (conn) set_error_message(conn, "Invalid connection or query");
         return false;
     }
 
@@ -558,7 +543,7 @@ bool pgpool_execute(pgconn_t* conn, const char* query, int timeout_ms) {
     }
 
     ExecStatusType status = PQresultStatus(res);
-    bool success = (status == PGRES_TUPLES_OK || status == PGRES_COMMAND_OK);
+    bool success          = (status == PGRES_TUPLES_OK || status == PGRES_COMMAND_OK);
 
     if (!success) {
         set_error_message(conn, PQresultErrorMessage(res));
@@ -575,8 +560,7 @@ bool pgpool_execute(pgconn_t* conn, const char* query, int timeout_ms) {
 // Execute a query and return the result to the caller
 PGresult* pgpool_query(pgconn_t* conn, const char* query, int timeout_ms) {
     if (!conn || !conn->raw_conn || !query) {
-        if (conn)
-            set_error_message(conn, "Invalid connection or query");
+        if (conn) set_error_message(conn, "Invalid connection or query");
         return NULL;
     }
 
@@ -619,8 +603,7 @@ PGresult* pgpool_query(pgconn_t* conn, const char* query, int timeout_ms) {
 bool pgpool_prepare(pgconn_t* conn, const char* stmt_name, const char* query, int n_params,
                     const Oid* param_types, int timeout_ms) {
     if (!conn || !conn->raw_conn || !stmt_name || !query) {
-        if (conn)
-            set_error_message(conn, "Invalid connection, statement name, or query");
+        if (conn) set_error_message(conn, "Invalid connection, statement name, or query");
         return false;
     }
 
@@ -662,8 +645,7 @@ PGresult* pgpool_execute_prepared(pgconn_t* conn, const char* stmt_name, int n_p
                                   const char* const* param_values, const int* param_lengths,
                                   const int* param_formats, int result_format, int timeout_ms) {
     if (!conn || !conn->raw_conn || !stmt_name) {
-        if (conn)
-            set_error_message(conn, "Invalid connection or statement name");
+        if (conn) set_error_message(conn, "Invalid connection or statement name");
         return NULL;
     }
 
@@ -704,8 +686,7 @@ PGresult* pgpool_execute_prepared(pgconn_t* conn, const char* stmt_name, int n_p
 // Deallocate a prepared statement
 bool pgpool_deallocate(pgconn_t* conn, const char* stmt_name, int timeout_ms) {
     if (!conn || !conn->raw_conn || !stmt_name) {
-        if (conn)
-            set_error_message(conn, "Invalid connection or statement name");
+        if (conn) set_error_message(conn, "Invalid connection or statement name");
         return false;
     }
 
@@ -714,7 +695,7 @@ bool pgpool_deallocate(pgconn_t* conn, const char* stmt_name, int timeout_ms) {
 
     // Create the deallocate command
     size_t query_len = strlen("DEALLOCATE ") + strlen(stmt_name) + 1;
-    char* query = malloc(query_len);
+    char* query      = malloc(query_len);
     if (!query) {
         set_error_message(conn, "Memory allocation failed");
         return false;
@@ -730,8 +711,7 @@ bool pgpool_deallocate(pgconn_t* conn, const char* stmt_name, int timeout_ms) {
 
 // Begin a transaction
 bool pgpool_begin(pgconn_t* conn) {
-    if (!conn)
-        return false;
+    if (!conn) return false;
 
     if (conn->transaction_active) {
         set_error_message(conn, "Transaction already active");
@@ -747,30 +727,28 @@ bool pgpool_begin(pgconn_t* conn) {
 
 // Commit a transaction
 bool pgpool_commit(pgconn_t* conn) {
-    if (!conn)
-        return false;
+    if (!conn) return false;
 
     if (!conn->transaction_active) {
         set_error_message(conn, "No active transaction to commit");
         return false;
     }
 
-    bool result = pgpool_execute(conn, "COMMIT", -1);
+    bool result              = pgpool_execute(conn, "COMMIT", -1);
     conn->transaction_active = false;
     return result;
 }
 
 // Rollback a transaction
 bool pgpool_rollback(pgconn_t* conn) {
-    if (!conn)
-        return false;
+    if (!conn) return false;
 
     if (!conn->transaction_active) {
         set_error_message(conn, "No active transaction to rollback");
         return false;
     }
 
-    bool result = pgpool_execute(conn, "ROLLBACK", -1);
+    bool result              = pgpool_execute(conn, "ROLLBACK", -1);
     conn->transaction_active = false;
     return result;
 }
@@ -782,8 +760,7 @@ PGconn* pgpool_get_raw_connection(pgconn_t* conn) {
 
 // Get the last error message
 const char* pgpool_error_message(pgconn_t* conn) {
-    if (!conn)
-        return "Invalid connection";
+    if (!conn) return "Invalid connection";
 
     if (conn->last_error) {
         return conn->last_error;
@@ -801,8 +778,7 @@ const char* pgpool_error_message(pgconn_t* conn) {
 
 // Get number of active connections
 size_t pgpool_active_connections(pgpool_t* pool) {
-    if (!pool || !pool->initialized)
-        return 0;
+    if (!pool || !pool->initialized) return 0;
 
     pthread_mutex_lock(&pool->lock);
     size_t count = pool->connection_count - pool->idle_count;
@@ -813,8 +789,7 @@ size_t pgpool_active_connections(pgpool_t* pool) {
 
 // Get number of idle connections
 size_t pgpool_idle_connections(pgpool_t* pool) {
-    if (!pool || !pool->initialized)
-        return 0;
+    if (!pool || !pool->initialized) return 0;
 
     pthread_mutex_lock(&pool->lock);
     size_t count = pool->idle_count;
@@ -825,8 +800,7 @@ size_t pgpool_idle_connections(pgpool_t* pool) {
 
 // Get total number of connections
 size_t pgpool_total_connections(pgpool_t* pool) {
-    if (!pool || !pool->initialized)
-        return 0;
+    if (!pool || !pool->initialized) return 0;
 
     pthread_mutex_lock(&pool->lock);
     size_t count = pool->connection_count;

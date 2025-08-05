@@ -137,6 +137,11 @@ All public functions are thread-safe. Multiple threads can safely:
 - Execute queries
 - Manage transactions
 
+
+## More utilities
+- [pgtypes.h](./pgtypes.h) : Contains value conversion functions.
+- [pg_iter.h](./pgiter.h) : Contains iterator helpers around PQResult.
+
 ## Building Tests
 
 ```bash

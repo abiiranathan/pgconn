@@ -7,31 +7,45 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-// Internal connection wrapper structure
+// Error message buffer capacity for per-connection last_error
+#define PGPOOL_ERR_CAPACITY 512
+
+// Internal connection wrapper structure (reordered for locality)
 struct pgconn {
+    // Hot fields first
+    // Pointer to libpq connection
     PGconn* raw_conn;         // The actual libpq connection
+    uint32_t connection_id;   // Unique connection identifier for debugging
     bool in_use;              // Flag indicating if connection is in use
     bool transaction_active;  // Flag for transaction state
-    time_t last_activity;     // Last time the connection was used
-    char* last_error;         // Last error message
-    uint32_t connection_id;   // Unique connection identifier for debugging
+
+    char _pad1[2];                         // Padding to align time_t (2 bytes)
+    time_t last_activity;                  // Last time the connection was used
+    char last_error[PGPOOL_ERR_CAPACITY];  // Last error message (NUL-terminated)
 };
 
-// Connection pool structure
+// Connection pool structure (reordered for locality)
 struct pgpool {
+
+    // === CACHELINE 1: Lock and synchronization (64 bytes) ===
+
     pthread_mutex_t lock;  // Mutex for thread safety
     pthread_cond_t cond;   // Condition variable for waiting threads
+    char _pad1[64 - ((sizeof(pthread_mutex_t) + sizeof(pthread_cond_t)) % 64)];
 
-    pgconn_t** connections;   // Array of all connections
-    size_t connection_count;  // Current number of connections
-    size_t idle_count;        // Number of idle connections
+    // === CACHELINE 2: Hot counters and flags (64 bytes) ===
 
+    size_t connection_count;  // Current number of connections (8 bytes)
+    size_t idle_count;        // Number of idle connections (8 bytes)
+    uint32_t next_conn_id;    // Next connection ID (4 bytes)
+    bool shutting_down;       // Pool shutdown flag (1 byte)
+    bool initialized;         // Pool initialized flag (1 byte)
+    char _pad2[42];           // Pad to 64 bytes to own cacheline
+
+    // Arrays and configuration
+    pgconn_t** connections;  // Array of all connections
     pgpool_config_t config;  // Configuration parameters
     char* conninfo;          // Copy of connection string
-
-    bool shutting_down;     // Flag indicating pool is being destroyed
-    bool initialized;       // Flag indicating pool is properly initialized
-    uint32_t next_conn_id;  // Next connection ID to assign
 };
 
 // Default configuration values
@@ -45,27 +59,15 @@ static const pgpool_config_t DEFAULT_CONFIG = {
     .conninfo         = NULL,
 };
 
-// Safe string duplication with error handling
-static inline char* safe_strdup(const char* str) {
-    if (!str) return NULL;
-
-    char* copy = strdup(str);
-    if (!copy) {
-        fprintf(stderr, "pgpool: Memory allocation failed in safe_strdup\n");
-    }
-    return copy;
-}
-
 // Safe error message setting
 static void set_error_message(pgconn_t* conn, const char* message) {
     if (!conn) return;
-
-    free(conn->last_error);
-    conn->last_error = NULL;
-
-    if (message) {
-        conn->last_error = safe_strdup(message);
+    if (!message) {
+        conn->last_error[0] = '\0';
+        return;
     }
+    // Copy and ensure NUL-termination
+    snprintf(conn->last_error, sizeof(conn->last_error), "%s", message);
 }
 
 // Internal function to create a new connection
@@ -94,7 +96,7 @@ static pgconn_t* create_connection(pgpool_t* pool) {
     if (PQstatus(conn->raw_conn) != CONNECTION_OK) {
         set_error_message(conn, PQerrorMessage(conn->raw_conn));
         fprintf(stderr, "pgpool: Connection failed (ID: %u): %s\n", conn->connection_id,
-                conn->last_error ? conn->last_error : "Unknown error");
+                conn->last_error[0] ? conn->last_error : "Unknown error");
         PQfinish(conn->raw_conn);
         free(conn);
         return NULL;
@@ -169,9 +171,6 @@ static void destroy_connection(pgpool_t* pool, pgconn_t* conn) {
         conn->raw_conn = NULL;
     }
 
-    free(conn->last_error);
-    conn->last_error = NULL;
-
     free(conn);
 }
 
@@ -204,7 +203,7 @@ pgpool_t* pgpool_create(const pgpool_config_t* config) {
     if (config->connection_close) pool->config.connection_close = config->connection_close;
 
     // Make a copy of the connection string
-    pool->conninfo = safe_strdup(config->conninfo);
+    pool->conninfo = strdup(config->conninfo);
     if (!pool->conninfo) {
         goto error_free_pool;
     }
@@ -346,7 +345,8 @@ pgconn_t* pgpool_acquire(pgpool_t* pool, int timeout_ms) {
 
             // Validate the connection if auto_reconnect is enabled
             if (pool->config.auto_reconnect && !validate_connection(conn)) {
-                fprintf(stderr, "pgpool: Reconnecting stale connection (ID: %u)\n", conn->connection_id);
+                fprintf(stderr, "pgpool: Reconnecting stale connection (ID: %u)\n",
+                        conn->connection_id);
                 destroy_connection(pool, conn);
                 pool->connections[i] = create_connection(pool);
                 conn                 = pool->connections[i];
@@ -396,7 +396,8 @@ pgconn_t* pgpool_acquire(pgpool_t* pool, int timeout_ms) {
                 pthread_mutex_unlock(&pool->lock);
                 return NULL;
             } else if (wait_result != 0) {
-                fprintf(stderr, "pgpool: pthread_cond_timedwait failed: %s\n", strerror(wait_result));
+                fprintf(stderr, "pgpool: pthread_cond_timedwait failed: %s\n",
+                        strerror(wait_result));
                 pthread_mutex_unlock(&pool->lock);
                 return NULL;
             }
@@ -446,8 +447,7 @@ void pgpool_release(pgpool_t* pool, pgconn_t* conn) {
     pool->idle_count++;
 
     // Clear any previous error
-    free(conn->last_error);
-    conn->last_error = NULL;
+    conn->last_error[0] = '\0';
 
     // Signal waiting threads that a connection is available
     pthread_cond_signal(&pool->cond);
@@ -599,6 +599,61 @@ PGresult* pgpool_query(pgconn_t* conn, const char* query, int timeout_ms) {
     return res;
 }
 
+// Execute a parameterized query without explicit prepare/deallocate
+PGresult* pgpool_query_params(pgconn_t* conn, const char* query, int n_params,
+                              const Oid* param_types, const char* const* param_values,
+                              const int* param_lengths, const int* param_formats, int result_format,
+                              int timeout_ms) {
+    if (!conn || !conn->raw_conn || !query) {
+        if (conn) set_error_message(conn, "Invalid connection or query");
+        return NULL;
+    }
+
+    // Allow zero params for convenience; normalize to zeroed pointers
+    if (n_params <= 0) {
+        n_params      = 0;
+        param_types   = NULL;
+        param_values  = NULL;
+        param_lengths = NULL;
+        param_formats = NULL;
+    }
+
+    // Clear any previous results
+    consume_all_results(conn);
+    set_error_message(conn, NULL);
+
+    // Send the parameterized query
+    if (PQsendQueryParams(conn->raw_conn, query, n_params, param_types, param_values, param_lengths,
+                          param_formats, result_format) != 1) {
+        set_error_message(conn, PQerrorMessage(conn->raw_conn));
+        return NULL;
+    }
+
+    // Wait for completion
+    if (!wait_for_query_completion(conn, timeout_ms)) {
+        return NULL;
+    }
+
+    // Get the result
+    PGresult* res = PQgetResult(conn->raw_conn);
+    if (!res) {
+        set_error_message(conn, "No result received from parameterized query");
+        return NULL;
+    }
+
+    ExecStatusType status = PQresultStatus(res);
+    if (status != PGRES_TUPLES_OK && status != PGRES_COMMAND_OK) {
+        set_error_message(conn, PQresultErrorMessage(res));
+        PQclear(res);
+        res = NULL;
+    }
+
+    // Consume any additional results
+    consume_all_results(conn);
+
+    return res;
+}
+
 // Prepare a statement
 bool pgpool_prepare(pgconn_t* conn, const char* stmt_name, const char* query, int n_params,
                     const Oid* param_types, int timeout_ms) {
@@ -654,8 +709,8 @@ PGresult* pgpool_execute_prepared(pgconn_t* conn, const char* stmt_name, int n_p
     set_error_message(conn, NULL);
 
     // Send the execute command
-    if (PQsendQueryPrepared(conn->raw_conn, stmt_name, n_params, param_values, param_lengths, param_formats,
-                            result_format) != 1) {
+    if (PQsendQueryPrepared(conn->raw_conn, stmt_name, n_params, param_values, param_lengths,
+                            param_formats, result_format) != 1) {
         set_error_message(conn, PQerrorMessage(conn->raw_conn));
         return NULL;
     }
@@ -762,7 +817,7 @@ PGconn* pgpool_get_raw_connection(pgconn_t* conn) {
 const char* pgpool_error_message(pgconn_t* conn) {
     if (!conn) return "Invalid connection";
 
-    if (conn->last_error) {
+    if (conn->last_error[0]) {
         return conn->last_error;
     }
 

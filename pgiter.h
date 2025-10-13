@@ -21,7 +21,7 @@ static inline pg_iterator_t pg_iter_create(PGresult* result) {
     return (pg_iterator_t){
         .result      = result,
         .current_row = 0,
-        .total_rows  = result ? PQntuples(result) : 0,
+        .total_rows  = result ? (size_t)PQntuples(result) : 0,
         .num_fields  = result ? PQnfields(result) : 0,
     };
 }

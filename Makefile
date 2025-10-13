@@ -1,118 +1,74 @@
-# Compiler and tools
-CC = gcc
-INSTALL = install
-RM = rm -f
-LDCONFIG = ldconfig
+# Simple Makefile driver for CMake builds
 
-# Directories
-INSTALL_DIR = /usr/local
-LIB_DIR = $(INSTALL_DIR)/lib
-INCLUDE_DIR = $(INSTALL_DIR)/include
-BUILD_DIR = build
+# User-configurable variables (can be overridden via environment or CLI)
+BUILD_DIR ?= build
+BUILD_TYPE ?= Release
+INSTALL_PREFIX ?= /usr/local
+CC ?= gcc
+CMAKE ?= cmake
+GENERATOR ?=
 
-# Library info
-LIB_NAME = pgpool
-LIB_VERSION = 1.0.0
-LIB_SONAME = lib$(LIB_NAME).so
-LIB_TARGET = $(LIB_SONAME).$(LIB_VERSION)
-LIB_LINK = $(LIB_SONAME).1
+# Optional extra flags passed to CMake
+CFLAGS ?=-Wall -Wextra -Wpedantic -Werror
+LDFLAGS ?=
 
-# Source and object files
-SOURCES = pgpool.c pgtypes.c
-OBJECTS = $(addprefix $(BUILD_DIR)/, $(SOURCES:.c=.o))
-DEPS = $(OBJECTS:.o=.d)
-HEADERS = pgpool.h pgtypes.h pgiter.h
-TEST_SOURCE = main.c
-TEST_TARGET = test
+# Internal
+CMAKE_GENERATOR_FLAG := $(if $(GENERATOR),-G "$(GENERATOR)",)
+CMAKE_CONFIG_FLAGS := -S . -B $(BUILD_DIR) \
+	-DCMAKE_BUILD_TYPE=$(BUILD_TYPE) \
+	-DCMAKE_INSTALL_PREFIX=$(INSTALL_PREFIX) \
+	-DCMAKE_C_COMPILER=$(CC) \
+	-DCMAKE_C_FLAGS="$(CFLAGS)" \
+	-DCMAKE_SHARED_LINKER_FLAGS="$(LDFLAGS)" \
+	-DCMAKE_EXE_LINKER_FLAGS="$(LDFLAGS)"
 
-# Compiler flags
-CFLAGS = -Wall -Wextra -Werror -pedantic -O3 -fPIC -std=c23 -D_GNU_SOURCE
-CPPFLAGS = 
-LDFLAGS = -lpq -pthread
-SHARED_LDFLAGS = -shared -Wl,-soname,$(LIB_LINK)
+.PHONY: all configure build debug release relwithdebinfo sanitize clean install uninstall help
 
-# Installation flags
-INSTALL_LIB_FLAGS = -m 755
-INSTALL_HEADER_FLAGS = -m 644
+all: build
 
-.PHONY: all library test clean install uninstall help
+configure:
+	$(CMAKE) $(CMAKE_GENERATOR_FLAG) $(CMAKE_CONFIG_FLAGS)
 
-all: library test
+build: configure
+	$(CMAKE) --build $(BUILD_DIR) -j
 
-# Create build directory
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+debug:
+	$(MAKE) build BUILD_TYPE=Debug
 
-# Shared library target
-library: $(LIB_TARGET)
+release:
+	$(MAKE) build BUILD_TYPE=Release
 
-$(LIB_TARGET): $(OBJECTS)
-	$(CC) $(SHARED_LDFLAGS) -o $@ $^ $(LDFLAGS)
-	ln -sf $(LIB_TARGET) $(LIB_SONAME)
-	ln -sf $(LIB_TARGET) $(LIB_LINK)
+relwithdebinfo:
+	$(MAKE) build BUILD_TYPE=RelWithDebInfo
 
-# Object file compilation
-$(BUILD_DIR)/%.o: %.c $(HEADERS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+# Example sanitizer build (AddressSanitizer); can be customized further
+sanitize:
+	$(MAKE) build BUILD_TYPE=Debug CFLAGS="$(CFLAGS) -fsanitize=address -fno-omit-frame-pointer" LDFLAGS="$(LDFLAGS) -fsanitize=address"
 
-# Test program target
-$(TEST_TARGET): $(TEST_SOURCE) $(LIB_TARGET)
-	$(CC) $(CFLAGS) -L. -o $@ $< -l$(LIB_NAME) $(LDFLAGS)
+install: build
+	$(CMAKE) --install $(BUILD_DIR)
 
-test: $(TEST_TARGET)
-
-# Installation targets
-install: $(LIB_TARGET)
-	$(INSTALL) -d $(LIB_DIR)
-	$(INSTALL) $(INSTALL_LIB_FLAGS) $(LIB_TARGET) $(LIB_DIR)
-	ln -sf $(LIB_TARGET) $(LIB_DIR)/$(LIB_SONAME)
-	ln -sf $(LIB_TARGET) $(LIB_DIR)/$(LIB_LINK)
-	$(INSTALL) -d $(INCLUDE_DIR)
-	$(INSTALL) $(INSTALL_HEADER_FLAGS) $(HEADERS) $(INCLUDE_DIR)
-	$(LDCONFIG)
-
+# Uninstall using CMake install manifest
 uninstall:
-	$(RM) $(LIB_DIR)/$(LIB_TARGET)
-	$(RM) $(LIB_DIR)/$(LIB_SONAME)
-	$(RM) $(LIB_DIR)/$(LIB_LINK)
-	$(RM) $(addprefix $(INCLUDE_DIR)/, $(HEADERS))
-	$(LDCONFIG)
+	@if [ -f "$(BUILD_DIR)/install_manifest.txt" ]; then \
+		xargs -a "$(BUILD_DIR)/install_manifest.txt" rm -f; \
+		echo "Uninstalled files listed in install_manifest.txt"; \
+	else \
+		echo "No install_manifest.txt found in $(BUILD_DIR)."; \
+		exit 1; \
+	fi
 
 clean:
-	$(RM) -r $(BUILD_DIR) $(LIB_TARGET) $(LIB_SONAME) $(LIB_LINK) $(TEST_TARGET)
+	rm -rf $(BUILD_DIR)
 
-# Development targets
-debug: CFLAGS += -g -DDEBUG -O0
-debug: clean all
-
-release: CFLAGS += -DNDEBUG
-release: clean all
-
-# Package creation
-PKG_NAME = lib$(LIB_NAME)-$(LIB_VERSION)
-PKG_FILES = $(SOURCES) $(HEADERS) $(TEST_SOURCE) Makefile README.md
-
-package: $(PKG_NAME).tar.gz
-
-$(PKG_NAME).tar.gz: $(PKG_FILES)
-	tar -czf $@ --transform 's,^,$(PKG_NAME)/,' $^
-
-# Help target
 help:
-	@echo "Available targets:"
-	@echo "  all       - Build library and test program (default)"
-	@echo "  library   - Build shared library only"
-	@echo "  test      - Build test program"
-	@echo "  debug     - Build with debug symbols and no optimization"
-	@echo "  release   - Build optimized release version"
-	@echo "  install   - Install library and headers to $(INSTALL_DIR)"
-	@echo "  uninstall - Remove installed files"
-	@echo "  package   - Create source tarball"
-	@echo "  clean     - Remove built files"
-	@echo "  help      - Show this help message"
-
-# Dependency tracking
--include $(DEPS)
-
-$(BUILD_DIR)/%.d: %.c | $(BUILD_DIR)
-	@$(CC) $(CFLAGS) $(CPPFLAGS) -MM $< | sed 's,\($*\)\.o[ :]*,$(BUILD_DIR)/\1.o $@ : ,g' > $@
+	@echo "CMake build driver targets:"
+	@echo "  all/build        - Configure and build (default BUILD_TYPE=$(BUILD_TYPE))"
+	@echo "  configure        - Run CMake configure step"
+	@echo "  debug            - Build with Debug"
+	@echo "  release          - Build with Release"
+	@echo "  relwithdebinfo   - Build with RelWithDebInfo"
+	@echo "  sanitize         - Build with AddressSanitizer"
+	@echo "  install          - Install into $(INSTALL_PREFIX)"
+	@echo "  uninstall        - Remove installed files via install_manifest.txt"
+	@echo "Variables: BUILD_DIR, BUILD_TYPE, INSTALL_PREFIX, CC, CFLAGS, LDFLAGS, GENERATOR"

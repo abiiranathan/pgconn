@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(pgpool LANGUAGES C VERSION 1.0.0)
+project(pgconn LANGUAGES C VERSION 1.0.0)
 
 # Options (build system should generally control shared/static)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
@@ -10,22 +10,23 @@ find_package(Threads REQUIRED)
 find_package(PostgreSQL REQUIRED)
 
 # Library
-add_library(pgpool SHARED
-    pgpool.c
+add_library(pgconn SHARED
+    pgconn.c
+    pgtypes.c
 )
 
-set_target_properties(pgpool PROPERTIES
+set_target_properties(pgconn PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
     VERSION ${PROJECT_VERSION}
 )
 
-target_include_directories(pgpool
+target_include_directories(pgconn
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(pgpool
+target_link_libraries(pgconn
     PRIVATE
         Threads::Threads
         PostgreSQL::PostgreSQL
@@ -34,8 +35,8 @@ target_link_libraries(pgpool
 # Install rules
 include(GNUInstallDirs)
 
-install(TARGETS pgpool
-    EXPORT pgpool-targets
+install(TARGETS pgconn
+    EXPORT pgconn-targets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -43,26 +44,26 @@ install(TARGETS pgpool
 )
 
 install(FILES
-    pgpool.h
+    pgconn.h
     pgtypes.h
     pgiter.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pgpool
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pgconn
 )
 
 # Export targets for downstream CMake projects (optional but helpful)
-install(EXPORT pgpool-targets
-    NAMESPACE pgpool::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/pgpool
+install(EXPORT pgconn-targets
+    NAMESPACE pgconn::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/pgconn
 )
 
 # pkg-config file generation
 set(PKGCONFIG_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/pgpool.pc.in
-    ${CMAKE_CURRENT_BINARY_DIR}/pgpool.pc
+    ${CMAKE_CURRENT_SOURCE_DIR}/pgconn.pc.in
+    ${CMAKE_CURRENT_BINARY_DIR}/pgconn.pc
     @ONLY
 )
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pgpool.pc
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pgconn.pc
     DESTINATION ${PKGCONFIG_INSTALL_DIR}
 )
 

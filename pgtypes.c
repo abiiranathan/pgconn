@@ -1,3 +1,7 @@
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "pgtypes.h"
 
 // Get an integer value from a PGresult at the specified row and column.
@@ -107,8 +111,8 @@ bool pg_get_bool(PGresult* res, int row, int col, bool* valid) {
     if (valid) *valid = true;
     // PostgreSQL boolean: 't'/'f', 'true'/'false', '1'/'0', 'yes'/'no', 'on'/'off'
     char first = val[0];
-    return (first == 't' || first == 'T' || first == '1' || first == 'y' || first == 'Y' || first == 'o' ||
-            first == 'O');
+    return (first == 't' || first == 'T' || first == '1' || first == 'y' || first == 'Y' ||
+            first == 'o' || first == 'O');
 }
 
 // Get a string value from a PGresult at the specified row and column.
@@ -152,7 +156,7 @@ const unsigned char* pg_get_binary(PGresult* res, int row, int col, size_t* leng
         return NULL;
     }
 
-    if (length) *length = PQgetlength(res, row, col);
+    if (length) *length = (size_t)PQgetlength(res, row, col);
     if (valid) *valid = true;
     return (const unsigned char*)PQgetvalue(res, row, col);
 }

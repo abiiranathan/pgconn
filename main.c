@@ -2,60 +2,49 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "pgpool.h"
+#include "pgconn.h"
 
 #define THREAD_COUNT 4
-#define ITERATIONS 5
+#define ITERATIONS   5
 
 typedef struct {
-    pgpool_t* pool;
+    pgconn_t* conn;
     int thread_id;
 } thread_data_t;
 
 void* thread_func(void* arg) {
     thread_data_t* data = (thread_data_t*)arg;
-    pgpool_t* pool = data->pool;
-    int thread_id = data->thread_id;
+    pgconn_t* conn      = data->conn;
+    int thread_id       = data->thread_id;
 
     for (int i = 0; i < ITERATIONS; i++) {
         printf("Thread %d, iteration %d\n", thread_id, i);
 
-        // Acquire connection with 1 second timeout
-        pgconn_t* conn = pgpool_acquire(pool, 1000);
-        if (!conn) {
-            fprintf(stderr, "Thread %d failed to acquire connection\n", thread_id);
-            continue;
-        }
-
         // Execute a simple query
-        PGresult* res = pgpool_query(conn, "SELECT 1", 1000);
+        PGresult* res = pgconn_query_safe(conn, "SELECT 1", NULL);
         if (res) {
             PQclear(res);
         } else {
-            fprintf(stderr, "Thread %d query failed: %s\n", thread_id, pgpool_error_message(conn));
+            fprintf(stderr, "Thread %d query failed: %s\n", thread_id, pgconn_error_message_safe(conn));
         }
 
         // Execute a prepared statement
-        if (pgpool_prepare(conn, "get_user", "SELECT * FROM users WHERE id = $1", 1, NULL, 1000)) {
+        if (pgconn_prepare_safe(conn, "get_user", "SELECT * FROM users WHERE id = $1", 1, NULL)) {
             const char* params[] = {"1"};
-
-            res = pgpool_execute_prepared(conn, "get_user", 1, params, NULL, NULL, 0, 1000);
+            res                  = pgconn_execute_prepared_safe(conn, "get_user", 1, params, NULL);
             if (res) {
                 PQclear(res);
             } else {
-                fprintf(stderr, "Thread %d prepared statement failed: %s\n", thread_id,
-                        pgpool_error_message(conn));
+                const char* fmt = "Thread %d prepared statement failed: %s\n";
+                fprintf(stderr, fmt, thread_id, pgconn_error_message_safe(conn));
             }
-            pgpool_deallocate(conn, "get_user", 1000);
+            pgconn_deallocate_safe(conn, "get_user");
         } else {
-            fprintf(stderr, "Thread %d prepare failed: %s\n", thread_id, pgpool_error_message(conn));
+            fprintf(stderr, "Thread %d prepare failed: %s\n", thread_id, pgconn_error_message_safe(conn));
         }
 
-        // Release connection back to pool
-        pgpool_release(pool, conn);
-
         // Small delay to simulate think time
-        usleep(10000 * (1 + (rand() % 5)));
+        usleep((unsigned)(10000 * (1 + (rand() % 5))));
     }
 
     return NULL;
@@ -68,16 +57,14 @@ int main() {
         return 1;
     }
 
-    pgpool_config_t config = {
-        .conninfo = conninfo,
-        .min_connections = 2,
-        .max_connections = 20,
-        .connect_timeout = 3,
+    pgconn_config_t config = {
+        .conninfo       = conninfo,
         .auto_reconnect = true,
+        .thread_safe    = true,
     };
 
-    pgpool_t* pool = pgpool_create(&config);
-    if (!pool) {
+    pgconn_t* conn = pgconn_create(&config);
+    if (!conn) {
         return 1;
     }
 
@@ -86,11 +73,12 @@ int main() {
 
     // Create threads
     for (int i = 0; i < THREAD_COUNT; i++) {
-        thread_data[i].pool = pool;
+        thread_data[i].conn      = conn;
         thread_data[i].thread_id = i;
+
         if (pthread_create(&threads[i], NULL, thread_func, &thread_data[i]) != 0) {
             perror("Failed to create thread");
-            pgpool_destroy(pool);
+            pgconn_destroy(conn);
             return 1;
         }
     }
@@ -100,6 +88,6 @@ int main() {
         pthread_join(threads[i], NULL);
     }
 
-    pgpool_destroy(pool);
+    pgconn_destroy(conn);
     return 0;
 }

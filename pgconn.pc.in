@@ -7,6 +7,6 @@ Name: pgpool
 Description: libpq-based PostgreSQL connection pool
 Version: @PROJECT_VERSION@
 Requires: libpq
-Libs: -L${libdir} -lpgpool -lpthread
-Cflags: -I${includedir}/pgpool
+Libs: -L${libdir} -lpgconn -lpthread
+Cflags: -I${includedir}/pgconn
 

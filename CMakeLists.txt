@@ -1,19 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
-
 project(pgconn LANGUAGES C VERSION 1.0.0)
 
-# Options (build system should generally control shared/static)
-option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-
-# Dependencies
-find_package(Threads REQUIRED)
-find_package(PostgreSQL REQUIRED)
-
-# Library
-add_library(pgconn SHARED
-    pgconn.c
-    pgtypes.c
-)
+add_library(pgconn pgconn.c  pgtypes.c)
 
 set_target_properties(pgconn PROPERTIES
     SOVERSION ${PROJECT_VERSION_MAJOR}
@@ -26,11 +14,7 @@ target_include_directories(pgconn
         $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(pgconn
-    PRIVATE
-        Threads::Threads
-        PostgreSQL::PostgreSQL
-)
+target_link_libraries(pgconn PRIVATE pq pthread)
 
 # Install rules
 include(GNUInstallDirs)
@@ -46,7 +30,6 @@ install(TARGETS pgconn
 install(FILES
     pgconn.h
     pgtypes.h
-    pgiter.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/pgconn
 )
 

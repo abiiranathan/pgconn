@@ -6,7 +6,7 @@ test
 *.o
 *.dll
 *.dylib
-build/
+build*/
 .cache/
 *.exe
 *.out

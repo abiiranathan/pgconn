@@ -28,8 +28,8 @@ struct pgconn {
 
 // Default query options
 static const pgconn_query_opts_t DEFAULT_QUERY_OPTS = {
-    .timeout_ms       = -1,  // Infinite timeout
-    .retry_on_failure = false,
+  .timeout_ms = -1,  // Infinite timeout
+  .retry_on_failure = false,
 };
 
 // === Internal Helper Functions ===
@@ -81,9 +81,9 @@ static bool wait_for_result(pgconn_t* conn, int timeout_ms) {
     struct timeval* tv_ptr = NULL;
 
     if (timeout_ms >= 0) {
-        tv.tv_sec  = timeout_ms / 1000;
+        tv.tv_sec = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
-        tv_ptr     = &tv;
+        tv_ptr = &tv;
     }
 
     while (true) {
@@ -172,7 +172,7 @@ pgconn_t* pgconn_create(const pgconn_config_t* config) {
     }
 
     // Copy configuration
-    conn->config          = *config;
+    conn->config = *config;
     conn->config.conninfo = strdup(config->conninfo);
     if (!conn->config.conninfo) {
         fprintf(stderr, "pgconn: Failed to copy connection string\n");
@@ -311,7 +311,7 @@ bool pgconn_reconnect(pgconn_t* conn) {
     }
 
     conn->reconnect_attempts = 0;  // Reset on success
-    conn->last_activity      = time(NULL);
+    conn->last_activity = time(NULL);
 
     return true;
 }
@@ -356,7 +356,7 @@ bool pgconn_execute(pgconn_t* conn, const char* query, const pgconn_query_opts_t
         }
 
         ExecStatusType status = PQresultStatus(res);
-        bool success          = (status == PGRES_COMMAND_OK || status == PGRES_TUPLES_OK);
+        bool success = (status == PGRES_COMMAND_OK || status == PGRES_TUPLES_OK);
 
         if (!success) {
             set_error(conn, PQresultErrorMessage(res));
@@ -384,7 +384,7 @@ bool pgconn_execute(pgconn_t* conn, const char* query, const pgconn_query_opts_t
     }
 
     ExecStatusType status = PQresultStatus(res);
-    bool success          = (status == PGRES_COMMAND_OK || status == PGRES_TUPLES_OK);
+    bool success = (status == PGRES_COMMAND_OK || status == PGRES_TUPLES_OK);
 
     if (!success) {
         set_error(conn, PQresultErrorMessage(res));
@@ -512,8 +512,8 @@ PGresult* pgconn_query_params_full(pgconn_t* conn, const char* query, int n_para
 
     // Use PQexecParams for simplicity when no timeout
     if (opts->timeout_ms < 0) {
-        PGresult* res = PQexecParams(conn->raw_conn, query, n_params, param_types, param_values, param_lengths,
-                                     param_formats, result_format);
+        PGresult* res = PQexecParams(
+            conn->raw_conn, query, n_params, param_types, param_values, param_lengths, param_formats, result_format);
         if (!res) {
             set_error(conn, "No result received from parameterized query");
             return NULL;
@@ -531,8 +531,9 @@ PGresult* pgconn_query_params_full(pgconn_t* conn, const char* query, int n_para
     }
 
     // With timeout, use async API
-    if (PQsendQueryParams(conn->raw_conn, query, n_params, param_types, param_values, param_lengths, param_formats,
-                          result_format) != 1) {
+    if (PQsendQueryParams(
+            conn->raw_conn, query, n_params, param_types, param_values, param_lengths, param_formats, result_format) !=
+        1) {
         set_error(conn, PQerrorMessage(conn->raw_conn));
         return NULL;
     }
@@ -569,8 +570,8 @@ PGresult* pgconn_query_params_full_safe(pgconn_t* conn, const char* query, int n
         pthread_mutex_lock(&conn->lock);
     }
 
-    PGresult* result = pgconn_query_params_full(conn, query, n_params, param_types, param_values, param_lengths,
-                                                param_formats, result_format, opts);
+    PGresult* result = pgconn_query_params_full(
+        conn, query, n_params, param_types, param_values, param_lengths, param_formats, result_format, opts);
 
     if (conn->thread_safe) {
         pthread_mutex_unlock(&conn->lock);
@@ -665,8 +666,8 @@ PGresult* pgconn_execute_prepared_full(pgconn_t* conn, const char* stmt_name, in
 
     // Use PQexecPrepared for simplicity when no timeout
     if (opts->timeout_ms < 0) {
-        PGresult* res = PQexecPrepared(conn->raw_conn, stmt_name, n_params, param_values, param_lengths, param_formats,
-                                       result_format);
+        PGresult* res = PQexecPrepared(
+            conn->raw_conn, stmt_name, n_params, param_values, param_lengths, param_formats, result_format);
         if (!res) {
             set_error(conn, "No result received from prepared statement");
             return NULL;
@@ -684,8 +685,8 @@ PGresult* pgconn_execute_prepared_full(pgconn_t* conn, const char* stmt_name, in
     }
 
     // With timeout, use async API
-    if (PQsendQueryPrepared(conn->raw_conn, stmt_name, n_params, param_values, param_lengths, param_formats,
-                            result_format) != 1) {
+    if (PQsendQueryPrepared(
+            conn->raw_conn, stmt_name, n_params, param_values, param_lengths, param_formats, result_format) != 1) {
         set_error(conn, PQerrorMessage(conn->raw_conn));
         return NULL;
     }
@@ -723,8 +724,8 @@ PGresult* pgconn_execute_prepared_full_safe(pgconn_t* conn, const char* stmt_nam
         pthread_mutex_lock(&conn->lock);
     }
 
-    PGresult* result = pgconn_execute_prepared_full(conn, stmt_name, n_params, param_values, param_lengths,
-                                                    param_formats, result_format, opts);
+    PGresult* result = pgconn_execute_prepared_full(
+        conn, stmt_name, n_params, param_values, param_lengths, param_formats, result_format, opts);
 
     if (conn->thread_safe) {
         pthread_mutex_unlock(&conn->lock);
@@ -835,7 +836,7 @@ bool pgconn_commit(pgconn_t* conn) {
         return false;
     }
 
-    bool result              = pgconn_execute(conn, "COMMIT", NULL);
+    bool result = pgconn_execute(conn, "COMMIT", NULL);
     conn->transaction_active = false;
 
     return result;
@@ -867,7 +868,7 @@ bool pgconn_rollback(pgconn_t* conn) {
         return false;
     }
 
-    bool result              = pgconn_execute(conn, "ROLLBACK", NULL);
+    bool result = pgconn_execute(conn, "ROLLBACK", NULL);
     conn->transaction_active = false;
 
     return result;

@@ -3,7 +3,7 @@ exec_prefix=${prefix}
 libdir=@CMAKE_INSTALL_FULL_LIBDIR@
 includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
 
-Name: pgpool
+Name: pgconn
 Description: libpq-based PostgreSQL connection pool
 Version: @PROJECT_VERSION@
 Requires: libpq
